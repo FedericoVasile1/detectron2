@@ -23,7 +23,7 @@ from PIL import Image
 from detectron2.structures import Boxes, pairwise_iou
 
 from .augmentation import Augmentation, _transform_to_aug
-from .transform import ExtentTransform, ResizeTransform, RotationTransform
+from .transform import ExtentTransform, ResizeTransform, RotationTransform, BlurTransform
 
 __all__ = [
     "FixedSizeCrop",
@@ -35,6 +35,7 @@ __all__ = [
     "RandomFlip",
     "RandomSaturation",
     "RandomLighting",
+    "RandomBlur",
     "RandomRotation",
     "Resize",
     "ResizeScale",
@@ -631,6 +632,16 @@ class RandomLighting(Augmentation):
         return BlendTransform(
             src_image=self.eigen_vecs.dot(weights * self.eigen_vals), src_weight=1.0, dst_weight=1.0
         )
+
+
+class RandomBlur(Augmentation):
+    def __init__(self, radius_min, radius_max):
+        super().__init__()
+        self._init(locals())
+
+    def get_transform(self, image):
+        r = np.random.uniform(self.radius_min, self.radius_max)
+        return BlurTransform(r)
 
 
 class RandomResize(Augmentation):

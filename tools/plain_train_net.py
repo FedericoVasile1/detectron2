@@ -50,10 +50,15 @@ from detectron2.modeling import build_model
 from detectron2.solver import build_lr_scheduler, build_optimizer
 from detectron2.utils.events import EventStorage
 
+from ihannes.config import add_my_config
+from ihannes.register_datasets import register_datasets
+from ihannes.ihannesvideo_evaluation import iHannesVideoEvaluator
+
+
 logger = logging.getLogger("detectron2")
 
 
-def get_evaluator(cfg, dataset_name, output_folder=None):
+def get_evaluator(cfg, dataset_name, eval_only, output_folder=None):
     """
     Create evaluator(s) for a given dataset.
     This uses the special metadata "evaluator_type" associated with each builtin dataset.
@@ -72,8 +77,32 @@ def get_evaluator(cfg, dataset_name, output_folder=None):
                 output_dir=output_folder,
             )
         )
-    if evaluator_type in ["coco", "coco_panoptic_seg"]:
+    if evaluator_type in ["coco", "coco_panoptic_seg"] \
+            and dataset_name != "iHannesDataset":
         evaluator_list.append(COCOEvaluator(dataset_name, output_dir=output_folder))
+    if evaluator_type == "ihannes_video" and dataset_name == "iHannesDataset":
+        if cfg.MODEL.META_ARCHITECTURE == "GeneralizedRCNN": 
+            task = "inst_seg"
+        elif cfg.MODEL.META_ARCHITECTURE == "SemanticSegmentor":
+            task = "sem_seg"
+        else:
+            raise NotImplementedError
+
+        evaluator_list.append(
+            iHannesVideoEvaluator(
+                dataset_name,
+                cfg.DATASETS.IHANNES.EVAL_TYPE,
+                cfg.DATASETS.IHANNES.LAST_FRAME_ID,
+                task,
+                # I can decide whether or not to save videos only when I am 
+                # in eval_only mode, since during training multiple 
+                # evaluation occurs (i.e., every cfg.TEST.EVAL_PERIOD) and 
+                # dumping frames for all of them is unfeasible
+                cfg.DATASETS.IHANNES.SAVE_OPTION if eval_only else "none",
+                cfg.DATASETS.IHANNES.TEST_SET,
+                output_dir=output_folder
+            )
+        )
     if evaluator_type == "coco_panoptic_seg":
         evaluator_list.append(COCOPanopticEvaluator(dataset_name, output_folder))
     if evaluator_type == "cityscapes_instance":
@@ -93,12 +122,13 @@ def get_evaluator(cfg, dataset_name, output_folder=None):
     return DatasetEvaluators(evaluator_list)
 
 
-def do_test(cfg, model):
+def do_test(cfg, model, eval_only):
     results = OrderedDict()
     for dataset_name in cfg.DATASETS.TEST:
         data_loader = build_detection_test_loader(cfg, dataset_name)
         evaluator = get_evaluator(
-            cfg, dataset_name, os.path.join(cfg.OUTPUT_DIR, "inference", dataset_name)
+            cfg, dataset_name, eval_only, 
+            os.path.join(cfg.OUTPUT_DIR, "inference", dataset_name)
         )
         results_i = inference_on_dataset(model, data_loader, evaluator)
         results[dataset_name] = results_i
@@ -157,7 +187,7 @@ def do_train(cfg, model, resume=False):
                 and (iteration + 1) % cfg.TEST.EVAL_PERIOD == 0
                 and iteration != max_iter - 1
             ):
-                do_test(cfg, model)
+                do_test(cfg, model, False)
                 # Compared to "train_net.py", the test results are not dumped to EventStorage
                 comm.synchronize()
 
@@ -174,6 +204,7 @@ def setup(args):
     Create configs and perform basic setups.
     """
     cfg = get_cfg()
+    add_my_config(cfg)
     cfg.merge_from_file(args.config_file)
     cfg.merge_from_list(args.opts)
     cfg.freeze()
@@ -186,13 +217,15 @@ def setup(args):
 def main(args):
     cfg = setup(args)
 
+    register_datasets(cfg)
+
     model = build_model(cfg)
     logger.info("Model:\n{}".format(model))
     if args.eval_only:
         DetectionCheckpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(
             cfg.MODEL.WEIGHTS, resume=args.resume
         )
-        return do_test(cfg, model)
+        return do_test(cfg, model, args.eval_only)
 
     distributed = comm.get_world_size() > 1
     if distributed:
@@ -201,10 +234,15 @@ def main(args):
         )
 
     do_train(cfg, model, resume=args.resume)
-    return do_test(cfg, model)
+    return do_test(cfg, model, False)
 
 
 if __name__ == "__main__":
+    launch_dir = os.path.join("detectron2", "tools")
+    if launch_dir not in os.getcwd():
+        raise Exception("To launch this file you must be in {} folder"
+                        .format(launch_dir))
+
     args = default_argument_parser().parse_args()
     print("Command Line Args:", args)
     launch(

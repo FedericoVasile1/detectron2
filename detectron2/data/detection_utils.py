@@ -650,6 +650,13 @@ def build_augmentation(cfg, is_train):
                 vertical=cfg.INPUT.RANDOM_FLIP == "vertical",
             )
         )
+    if is_train and hasattr(cfg.INPUT, "BLUR") and cfg.INPUT.BLUR.ENABLED:
+        augmentation.append(
+            T.RandomApply(
+                T.RandomBlur(cfg.INPUT.BLUR.RADIUS_MIN, cfg.INPUT.BLUR.RADIUS_MAX),
+                cfg.INPUT.BLUR.PROB_APPLY
+            )
+        )
     return augmentation
 
 

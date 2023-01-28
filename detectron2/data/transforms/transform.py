@@ -30,6 +30,7 @@ __all__ = [
     "RotationTransform",
     "ColorTransform",
     "PILColorTransform",
+    "BlurTransform",
 ]
 
 
@@ -302,6 +303,12 @@ class PILColorTransform(ColorTransform):
     def apply_image(self, img):
         img = Image.fromarray(img)
         return np.asarray(super().apply_image(img))
+
+
+class BlurTransform(PILColorTransform):
+    def __init__(self, radius): 
+        op = lambda image : image.filter(ImageFilter.GaussianBlur(radius))
+        super().__init__(op)
 
 
 def HFlip_rotated_box(transform, rotated_boxes):
