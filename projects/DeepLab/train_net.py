@@ -12,10 +12,13 @@ import os
 import detectron2.data.transforms as T
 from detectron2.checkpoint import DetectionCheckpointer
 from detectron2.config import get_cfg
-from detectron2.data import DatasetMapper, MetadataCatalog, build_detection_train_loader
+from detectron2.data import DatasetMapper, MetadataCatalog, build_detection_train_loader, DatasetCatalog
 from detectron2.engine import DefaultTrainer, default_argument_parser, default_setup, launch
 from detectron2.evaluation import CityscapesSemSegEvaluator, DatasetEvaluators, SemSegEvaluator
 from detectron2.projects.deeplab import add_deeplab_config, build_lr_scheduler
+
+from get_semseg_dataset import get_semseg_dicts
+from convert_semseg_gt import CLASSES_LIST
 
 
 def build_sem_seg_train_aug(cfg):
@@ -105,8 +108,22 @@ def setup(args):
     return cfg
 
 
+def register_datasets(cfg):
+    for dataset_name in cfg.DATASETS.TRAIN + cfg.DATASETS.TEST:
+        DatasetCatalog.register(
+            dataset_name,
+            lambda elem=dataset_name : get_semseg_dicts(elem)
+        )
+        MetadataCatalog.get(dataset_name).set(
+            stuff_classes=CLASSES_LIST, evaluator_type="sem_seg",
+            ignore_label=[]
+        )
+
+
 def main(args):
     cfg = setup(args)
+
+    register_datasets(cfg)
 
     if args.eval_only:
         model = Trainer.build_model(cfg)
