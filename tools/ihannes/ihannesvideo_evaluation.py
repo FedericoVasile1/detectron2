@@ -45,8 +45,7 @@ class iHannesVideoEvaluator(DatasetEvaluator):
         assert eval_type == "centroid"
         assert task in ["sem_seg", "inst_seg"]
 
-        # TODO THE LOGGER IS NOT LOGGING
-        self._logger = logging.getLogger(__name__)
+        self._logger = logging.getLogger("detectron2")
         self._distributed = distributed
         self._output_dir = output_dir
 
