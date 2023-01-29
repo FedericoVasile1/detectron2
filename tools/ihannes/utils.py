@@ -13,7 +13,7 @@ def find_centroid(mask):
     return x_center, y_center    
 
 
-def mask_closest_center(pred_classes, pred_masks, draw=None, img=None):
+def mask_closest_center(pred_classes, pred_masks, ignore_idxs=[], draw=None, img=None):
     '''
     pred_classes: torch.tensor, shape (N,), int in range [0, num_categories). 
                   N is the number of instances detected in the image
@@ -27,6 +27,9 @@ def mask_closest_center(pred_classes, pred_masks, draw=None, img=None):
     min_dist = None
     min_dist_idx_cls = -1
     for idx_inst in range(pred_classes.shape[0]):
+        if pred_classes[idx_inst].item() in ignore_idxs:
+            continue
+
         bin_mask = pred_masks[idx_inst]
         if (np.unique(bin_mask) == np.array([False])).all():
             #print('SKIP INSTANCE, NO MASK PREDICTED')

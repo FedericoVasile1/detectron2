@@ -17,8 +17,9 @@ from detectron2.engine import DefaultTrainer, default_argument_parser, default_s
 from detectron2.evaluation import CityscapesSemSegEvaluator, DatasetEvaluators, SemSegEvaluator
 from detectron2.projects.deeplab import add_deeplab_config, build_lr_scheduler
 
-from get_semseg_dataset import get_semseg_dicts
-from convert_semseg_gt import CLASSES_LIST
+from tools.ihannes.register_datasets import register_datasets
+from tools.ihannes.ihannesvideo_evaluation import iHannesVideoEvaluator
+from tools.ihannes.config import add_my_config
 
 
 def build_sem_seg_train_aug(cfg):
@@ -68,6 +69,22 @@ class Trainer(DefaultTrainer):
             )
         if evaluator_type == "cityscapes_sem_seg":
             return CityscapesSemSegEvaluator(dataset_name)
+        if evaluator_type == "ihannes_video":
+            assert dataset_name == "iHannesDataset"
+            global eval_only
+            return iHannesVideoEvaluator(
+                dataset_name,
+                cfg.DATASETS.IHANNES.EVAL_TYPE,
+                cfg.DATASETS.IHANNES.LAST_FRAME_ID,
+                "sem_seg",
+                # I can decide whether or not to save videos only when I am 
+                # in eval_only mode, since during training multiple 
+                # evaluation occurs (i.e., every cfg.TEST.EVAL_PERIOD) and 
+                # dumping frames for all of them is unfeasible
+                cfg.DATASETS.IHANNES.SAVE_OPTION if eval_only else "none",
+                cfg.DATASETS.IHANNES.TEST_SET,
+                output_dir=output_folder
+            )
         if len(evaluator_list) == 0:
             raise NotImplementedError(
                 "no Evaluator for the dataset {} with the type {}".format(
@@ -101,6 +118,7 @@ def setup(args):
     """
     cfg = get_cfg()
     add_deeplab_config(cfg)
+    add_my_config(cfg)
     cfg.merge_from_file(args.config_file)
     cfg.merge_from_list(args.opts)
     cfg.freeze()
@@ -108,22 +126,12 @@ def setup(args):
     return cfg
 
 
-def register_datasets(cfg):
-    for dataset_name in cfg.DATASETS.TRAIN + cfg.DATASETS.TEST:
-        DatasetCatalog.register(
-            dataset_name,
-            lambda elem=dataset_name : get_semseg_dicts(elem)
-        )
-        MetadataCatalog.get(dataset_name).set(
-            stuff_classes=CLASSES_LIST, evaluator_type="sem_seg",
-            ignore_label=[]
-        )
-
-
 def main(args):
     cfg = setup(args)
 
     register_datasets(cfg)
+    global eval_only
+    eval_only = args.eval_only
 
     if args.eval_only:
         model = Trainer.build_model(cfg)
@@ -139,6 +147,11 @@ def main(args):
 
 
 if __name__ == "__main__":
+    launch_dir = os.path.join("detectron2", "projects", "DeepLab")
+    if launch_dir not in os.getcwd():
+        raise Exception("To launch this file you must be in {} folder"
+                        .format(launch_dir))
+                        
     args = default_argument_parser().parse_args()
     print("Command Line Args:", args)
     launch(

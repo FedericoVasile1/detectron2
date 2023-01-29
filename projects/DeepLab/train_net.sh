@@ -1,7 +1,7 @@
 python train_net.py \
 --config-file 'configs/Cityscapes-SemanticSegmentation/deeplab_v3_plus_R_103_os16_mg124_poly_90k_bs16.yaml' \
 DATASETS.TRAIN "('sphere-semseg-ctr-trainset',)" \
-DATASETS.TEST "('sphere-semseg-ctr-valset',)" \
+DATASETS.TEST "('iHannesDataset','sphere-semseg-ctr-valset',)" \
 SOLVER.MAX_ITER 100000 \
 TEST.EVAL_PERIOD 2500 \
 SOLVER.CHECKPOINT_PERIOD 2500 \

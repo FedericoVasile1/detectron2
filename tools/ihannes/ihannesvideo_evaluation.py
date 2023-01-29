@@ -100,19 +100,19 @@ class iHannesVideoEvaluator(DatasetEvaluator):
             if video_string not in self._videostring_2_framepreds:
                 self._videostring_2_framepreds[video_string] = {}
 
-            if len(output["instances"]) == 0:
-                # no instance predicted at the current frame
-                frame_metadatas["idx_pred_cls"] = -1
-                if self._save_option != "none":
-                    # empty list since no instance is detected
-                    frame_metadatas["instances"] = [] 
-                image_id = int(input["image_id"])
-                self._videostring_2_framepreds[video_string][image_id] = \
-                    frame_metadatas
-                continue
-
             # Get per-frame prediction using the method defined in eval_type
             if self._task == "inst_seg":
+                if len(output["instances"]) == 0:
+                    # no instance predicted at the current frame
+                    frame_metadatas["idx_pred_cls"] = -1
+                    if self._save_option != "none":
+                        # empty list since no instance is detected
+                        frame_metadatas["instances"] = [] 
+                    image_id = int(input["image_id"])
+                    self._videostring_2_framepreds[video_string][image_id] = \
+                        frame_metadatas
+                    continue
+
                 if self._eval_type == "centroid":
                     frame_metadatas["idx_pred_cls"] = mask_closest_center(
                         output["instances"].pred_classes.to(self._cpu_device),
@@ -135,7 +135,29 @@ class iHannesVideoEvaluator(DatasetEvaluator):
                     raise NotImplementedError
 
             elif self._task == "sem_seg":
-                raise NotImplementedError
+                if self._eval_type == "centroid":
+                    ignore_idxs = []
+                    ignore_idxs.append(self._metadata.stuff_classes.index("background"))
+                    ignore_idxs.append(self._metadata.stuff_classes.index("object_part"))
+
+                    output["sem_seg"] = output["sem_seg"].argmax(dim=0).to(self._cpu_device)
+                    pred_classes = torch.unique(output["sem_seg"])
+                    pred_masks = []
+                    for p_c in pred_classes:
+                        pred_masks.append(output["sem_seg"] == p_c)
+                    pred_masks = torch.stack(pred_masks) 
+
+                    # TODO it is not always correct: in case one class has
+                    #      multiple separated blobs the computed centroid is 
+                    #      wrong, since it does not take this into account
+                    frame_metadatas["idx_pred_cls"] = mask_closest_center(
+                        pred_classes, pred_masks, ignore_idxs
+                    )
+
+                    if self._save_option != "none":
+                        raise NotImplementedError
+                        # TODO
+                        frame_metadatas["sem_seg"] = None
 
             image_id = int(input["image_id"])
             self._videostring_2_framepreds[video_string][image_id] = frame_metadatas
@@ -219,57 +241,80 @@ class iHannesVideoEvaluator(DatasetEvaluator):
                 for i in idxs_frames:
                     if i > self._last_frame_id:
                         continue
+
                     # 1. load image and draw predicted masks
                     img = cv2.imread(idxframe_to_metadatas[i]["file_name"])
                     v = Visualizer(
                         img[:, :, ::-1], metadata=self._metadata, scale=1.0
                     )
-                    # decode rle to binary masks
-                    instances = annotations_to_instances(
-                        idxframe_to_metadatas[i]["instances"], 
-                        (idxframe_to_metadatas[i]["height"], idxframe_to_metadatas[i]["width"]),
-                        "bitmask"
-                    )
-                    assert isinstance(instances, Instances)
-                    # just to be clear, they are not ground truth but predicted,
-                    # so fix it 
-                    instances.set("pred_boxes", instances.gt_boxes)
-                    instances.remove("gt_boxes")
-                    instances.set("pred_classes", instances.gt_classes)
-                    instances.remove("gt_classes")
-                    if instances.has("gt_masks"):
-                        instances.set("pred_masks", instances.gt_masks.tensor)
-                        instances.remove("gt_masks")
-                    instances.scores = torch.tensor(
-                        [inst["score"] for inst in idxframe_to_metadatas[i]["instances"]]
-                    )
-                    img = v.draw_instance_predictions(instances)
-                    img = copy.deepcopy(img.get_image()[:, :, ::-1])
+                    if self._task == "inst_seg":
+                        # decode rle to binary masks
+                        instances = annotations_to_instances(
+                            idxframe_to_metadatas[i]["instances"], 
+                            (idxframe_to_metadatas[i]["height"], idxframe_to_metadatas[i]["width"]),
+                            "bitmask"
+                        )
+                        assert isinstance(instances, Instances)
+                        # just to be clear, they are not ground truth but predicted,
+                        # so fix it 
+                        instances.set("pred_boxes", instances.gt_boxes)
+                        instances.remove("gt_boxes")
+                        instances.set("pred_classes", instances.gt_classes)
+                        instances.remove("gt_classes")
+                        if instances.has("gt_masks"):
+                            instances.set("pred_masks", instances.gt_masks.tensor)
+                            instances.remove("gt_masks")
+                        instances.scores = torch.tensor(
+                            [inst["score"] for inst in idxframe_to_metadatas[i]["instances"]]
+                        )
+
+                        img = v.draw_instance_predictions(instances)
+                        img = copy.deepcopy(img.get_image()[:, :, ::-1])
+                    elif self._task == "sem_seg":
+                        raise NotImplementedError
+                        # TODO
+                    else:
+                        raise Exception
+
                     # 2. color all mask centroid as red
-                    if self._eval_type == "centroid":
-                        centroids_list = []
-                        if instances.has("pred_masks"):
-                            centroids_list = get_centroid_coords(
-                                instances.pred_masks,
-                                idxframe_to_metadatas[i]["height"],
+                    if self._task == "inst_seg":
+                        if self._eval_type == "centroid":
+                            centroids_list = []
+                            if instances.has("pred_masks"):
+                                centroids_list = get_centroid_coords(
+                                    instances.pred_masks,
+                                    idxframe_to_metadatas[i]["height"],
+                                    idxframe_to_metadatas[i]["width"]
+                                )
+                                for c in centroids_list:
+                                    x, y = c
+                                    cv2.circle(img, (x, y), 1, (0, 0, 255), 5)
+                        else:
+                            raise NotImplementedError
+                    elif self._task == "sem_seg":
+                        raise NotImplementedError
+                        # TODO
+                    else:
+                        raise Exception
+
+                    # 3. get closest-to-image-center centroid and color it as green 
+                    if self._task == "inst_seg":
+                        if self._eval_type == "centroid":
+                            x_y = centroid_closest_to_img_ctr(
+                                centroids_list, 
+                                idxframe_to_metadatas[i]["height"], 
                                 idxframe_to_metadatas[i]["width"]
                             )
-                            for c in centroids_list:
-                                x, y = c
-                                cv2.circle(img, (x, y), 1, (0, 0, 255), 5)
-                    else:
+                            if x_y is not None:
+                                cv2.circle(img, (x_y[0], x_y[1]), 1, (0, 255, 0), 5)
+                        else:
+                            raise NotImplementedError
+                    elif self._task == "sem_seg":
                         raise NotImplementedError
-                    # 3. get closest-to-image-center centroid and color it as green 
-                    if self._eval_type == "centroid":
-                        x_y = centroid_closest_to_img_ctr(
-                            centroids_list, 
-                            idxframe_to_metadatas[i]["height"], 
-                            idxframe_to_metadatas[i]["width"]
-                        )
-                        if x_y is not None:
-                            cv2.circle(img, (x_y[0], x_y[1]), 1, (0, 255, 0), 5)
+                        # TODO
                     else:
-                        raise NotImplementedError
+                        raise Exception
+
                     # 4. print per-frame predictions so far on the current frame
                     cls = idxframe_to_metadatas[i]["idx_pred_cls"]
                     if cls == -1:
