@@ -16,7 +16,7 @@ from fvcore.transforms.transform import (
     Transform,
     TransformList,
 )
-from PIL import Image
+from PIL import Image, ImageFilter
 
 try:
     import cv2  # noqa
